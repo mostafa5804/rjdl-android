@@ -59,7 +59,7 @@
 ## 📱 نحوه نصب و استفاده (Installation & Setup)
 
 ### دانلود مستقیم:
-1. به تب [**Releases**](https://github.com/mostafa5804/rj-downloader/releases) در گیت‌هاب بروید.
+1. به تب [**Releases**](https://github.com/mostafa5804/rjdl-android/releases) در گیت‌هاب بروید.
 2. آخرین فایل نصبی با فرمت `.apk` را دانلود کرده و روی گوشی نصب نمایید.
 
 ### فعال‌سازی در مانیتور خودرو (Android Auto):
