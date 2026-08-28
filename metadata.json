@@ -1,0 +1,6 @@
+{
+  "name": "RJ DL",
+  "description": "Hybrid Radio Javan streaming client with Android Auto media service, background audio, and dynamic Cloudflare Worker browse tree",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,11 +1,75 @@
+# 🎵 RJ DL — Radio Javan Downloader & Android Auto Player
+
 <div align="center">
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+![Platform](https://img.shields.io/badge/Platform-Android%20%7C%20Android%20Auto-green?style=for-the-badge&logo=android)
+![Kotlin](https://img.shields.io/badge/Kotlin-2.0-purple?style=for-the-badge&logo=kotlin)
+![Media3](https://img.shields.io/badge/AndroidX-Media3%20%2F%20ExoPlayer-blue?style=for-the-badge)
+![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)
+![Release](https://img.shields.io/github/v/release/mostafa5804/rj-downloader?style=for-the-badge&logo=github&color=orange)
 
-  <h1>Built with AI Studio</h2>
-
-  <p>The fastest path from prompt to production with Gemini.</p>
-
-  <a href="https://aistudio.google.com/apps">Start building</a>
+**کلاینت پیشرفته استریم و دانلود رادیوجوان با پشتیبانی کامل و رسمی از داشبورد اندروید اتو (Android Auto)**
 
 </div>
+
+---
+
+## 🌟 ویژگی‌های برجسته (Key Highlights)
+
+### 🚗 ۱. ادغام کامل با اندروید اتو (Full Android Auto Integration)
+* **طراحی رابط کاربری بومی خودرو (Native Car UI):** ساختار کامپوننت‌های بهینه‌سازی شده برای داشبورد خودرو منطبق بر استانداردهای ایمنی رانندگی گوگل بدون استفاده از وب‌ویوهای پرمصرف.
+* **پشتیبانی از کلیدهای کنترل فرمان (Steering Wheel Controls):** کنترل بی‌وقفه پخش/توقف، تعویض تِرک قبلی و بعدی از روی کلیدهای فرمان خودرو.
+* **کنترل اختصاصی پادکست‌ها:** دکمه‌های پرش **۱۰ ثانیه به عقب (`-10s`)** و **۳۰ ثانیه به جلو (`+30s`)** برای راحتی در گوش دادن به میکس‌ها و شوهای طولانی.
+* **کاهش هوشمند صدا هنگام مسیریابی (Audio Ducking):** مدیریت حرفه‌ای فوکوس صدا؛ کاهش ملایم صدای موزیک هنگام اعلام هشدارهای صوتی مسیریاب‌ها (Google Maps، Waze، نشان و بلد) و بازگشت خودکار به بلندی قبلی.
+* **ادامه پخش خودکار (Auto-Resume):** ادامه پخش خودکار تِرک از ثانیه دقیق توقف به محض اتصال به خودرو یا هندزفری.
+
+### 🔍 ۲. آرشیو شوها و جستجوی بومی در مانیتور (Native Search & Browse)
+* **جستجوی صوتی (Google Assistant):** قابلیت پخش با فرمان صوتی در خودرو (*"Play [Name] on RJ DL"*).
+* **جستجوی متنی داشبورد:** جستجوی مستقیم خواننده یا آهنگ از طریق آیکون جستجوی بالای صفحه مانیتور خودرو.
+* **دسته‌بندی‌های داغ و متنوع:**
+  - 🔥 داغ‌ترین آهنگ‌ها (`Featured Songs`)
+  - 🎙 جدیدترین پادکست‌ها (`New Podcasts`)
+  - 📻 آرشیو کامل شوهای اختصاصی رادیوجوان (**آب و آتش**، **جعبه اسرار**، **تهرانجلس**، **میکس**، **شمارش معکوس**، **شب جمعه**، **کلاب میکس** و **ترنس‌فرم**).
+
+### ⚡ ۳. پخش پایدار و ضد قطعی در تونل‌ها (Offline Resilient)
+* مجهز به **کش هوشمند LRU با ظرفیت ۵۰۰ مگابایت** در ExoPlayer؛ بافرینگ پایدار و پخش بدون وقفه موزیک حتی در تونل‌ها یا نقاط کور با آنتن‌دهی ضعیف.
+
+### 📥 ۴. دانلودر حرفه‌ای و ذخیره محلی (Advanced Downloader)
+* **انتخاب کیفیت:** دانلود تکی آهنگ‌ها و پادکست‌ها با دو کیفیت **320kbps** (عالی) و **128kbps** (پیش‌فرض/حجم کم).
+* **دانلود پایدار و مستقیم:** اتصال به `DownloadManager` نیتیو اندروید بدون ایجاد لینک‌های موقت Blob.
+* **خروجی گروهی ZIP:** امکان دانلود و استخراج بسته‌ای قطعات به صورت فایل فشرده ZIP و ذخیره مستقیم در پوشه `Downloads`.
+
+### 🤖 ۵. رابط وب‌اپ و پشتیبانی تلگرام (Telegram Mini App Ready)
+* ساختار هایبرید واکنش‌گرا و مدرن سازگار با مینی‌اپ تلگرام و حالت‌های تاریک و روشن (Dark / Light Theme).
+
+---
+
+## 🛠 فناوری‌ها و معماری پروژه (Tech Stack)
+
+| بخش | فناوری | توضیحات |
+| :--- | :--- | :--- |
+| **زبان و فریم‌ورک اصلی** | **Kotlin & Jetpack Compose** | معماری مدرن بر پایه `ComponentActivity` و سیستم ویجت‌های بهینه‌سازی‌شده |
+| **هسته صوتی و مدیا** | **AndroidX Media3 (ExoPlayer)** | مدیریت سرویس پس‌زمینه `MediaLibraryService` و نشست‌های مدیا `MediaSession` |
+| **بریج و رابط کاربری** | **AndroidBridge / JavaScript Interface** | ارتباط دوطرفه بدون تأخیر میان وب‌ویو و پلیر نیتیو سیستم‌عامل |
+| **دسترسی به فایل و دانلود** | **MediaStore API & DownloadManager** | ذخیره استاندارد و عمومی در حافظه سیستم بدون نیاز به دسترسی‌های خطرناک |
+| **پراکسی و سرور واسط** | **Cloudflare Workers** | پردازش سریع، بدون تحریم و کم‌مصرف برای دریافت ایمن استریم‌ها و اطلاعات متادیتا |
+
+---
+
+## 📱 نحوه نصب و استفاده (Installation & Setup)
+
+### دانلود مستقیم:
+1. به تب [**Releases**](https://github.com/mostafa5804/rj-downloader/releases) در گیت‌هاب بروید.
+2. آخرین فایل نصبی با فرمت `.apk` را دانلود کرده و روی گوشی نصب نمایید.
+
+### فعال‌سازی در مانیتور خودرو (Android Auto):
+1. در گوشی وارد **Settings > Connected devices > Android Auto** شوید.
+2. در انتهای منو روی گزینه **Version** ۱۰ بار ضربه بزنید تا حالت برنامه‌نویس (Developer Settings) فعال شود.
+3. از منوی سه‌نقطه بالای صفحه گزینه **Developer settings** را انتخاب کرده و تیک **Unknown sources (منابع ناشناس)** را فعال کنید.
+4. گوشی را به مانیتور خودرو متصل کرده و از اپلیکیشن **RJ DL** لذت ببرید!
+
+---
+
+## 📄 لایسنس (License)
+
+این پروژه تحت مجوز **[MIT License](LICENSE)** منتشر شده است و استفاده شخصی و توسعه آن کاملاً آزاد است.
