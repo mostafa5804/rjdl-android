@@ -18,10 +18,8 @@ import android.util.Base64
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
-import android.webkit.DownloadListener
 import android.webkit.JavascriptInterface
 import android.webkit.URLUtil
-import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -79,14 +77,7 @@ class MainActivity : ComponentActivity() {
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             runOnUiThread {
-                val controller = mediaController ?: return@runOnUiThread
-                val currentIdx = controller.currentMediaItemIndex
-                val id = mediaItem?.mediaId ?: ""
-                val title = JSONObject.quote(mediaItem?.mediaMetadata?.title?.toString() ?: "")
-                val artist = JSONObject.quote(mediaItem?.mediaMetadata?.artist?.toString() ?: "")
-                val artworkUri = JSONObject.quote(mediaItem?.mediaMetadata?.artworkUri?.toString() ?: "")
-                val json = """{"index":$currentIdx,"id":${JSONObject.quote(id)},"title":$title,"artist":$artist,"coverUrl":$artworkUri}"""
-                webView?.evaluateJavascript("if(window.onNativeTrackChanged){window.onNativeTrackChanged($json);}", null)
+                syncCurrentTrackToWeb()
             }
         }
 
@@ -99,22 +90,59 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun syncCurrentTrackToWeb() {
+        val controller = mediaController ?: return
+        val mediaItem = controller.currentMediaItem ?: return
+        val currentIdx = controller.currentMediaItemIndex
+        val id = mediaItem.mediaId
+        val title = JSONObject.quote(mediaItem.mediaMetadata.title?.toString() ?: "")
+        val artist = JSONObject.quote(mediaItem.mediaMetadata.artist?.toString() ?: "")
+        val artworkUri = JSONObject.quote(mediaItem.mediaMetadata.artworkUri?.toString() ?: "")
+        val json = """{"index":$currentIdx,"id":${JSONObject.quote(id)},"title":$title,"artist":$artist,"coverUrl":$artworkUri}"""
+        webView?.evaluateJavascript("if(window.onNativeTrackChanged){window.onNativeTrackChanged($json);}", null)
+    }
+
+
+    private val playbackReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                "com.example.ACTION_NEXT" -> webView?.evaluateJavascript("if(window.playNextInQueue){window.playNextInQueue();}", null)
+                "com.example.ACTION_PREV" -> webView?.evaluateJavascript("if(window.playPrevInQueue){window.playPrevInQueue();}", null)
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
+            }
+        }
+
         enableEdgeToEdge()
+        val filter = android.content.IntentFilter().apply {
+            addAction("com.example.ACTION_NEXT")
+            addAction("com.example.ACTION_PREV")
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(playbackReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(playbackReceiver, filter)
+        }
 
         connectToMediaService()
         startProgressUpdates()
 
-        // Handle hardware back button navigation in WebView
+        // Handle hardware back button navigation safely without closing app
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 val wv = webView
                 if (wv != null && wv.canGoBack()) {
                     wv.goBack()
                 } else {
-                    isEnabled = false
-                    onBackPressedDispatcher.onBackPressed()
+                    // Send to background without killing activity state
+                    moveTaskToBack(true)
                 }
             }
         })
@@ -145,6 +173,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        syncCurrentTrackToWeb()
+        mediaController?.let {
+            val isPlaying = it.isPlaying
+            webView?.evaluateJavascript("if(window.onNativePlaybackStateChanged){window.onNativePlaybackStateChanged($isPlaying);}", null)
+        }
+    }
+
     private fun connectToMediaService() {
         val sessionToken = SessionToken(this, ComponentName(this, PlaybackService::class.java))
         controllerFuture = MediaController.Builder(this, sessionToken).buildAsync()
@@ -152,6 +189,13 @@ class MainActivity : ComponentActivity() {
             try {
                 mediaController = controllerFuture?.get()
                 mediaController?.addListener(playerListener)
+                runOnUiThread {
+                    syncCurrentTrackToWeb()
+                    mediaController?.let {
+                        val isPlaying = it.isPlaying
+                        webView?.evaluateJavascript("if(window.onNativePlaybackStateChanged){window.onNativePlaybackStateChanged($isPlaying);}", null)
+                    }
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -256,6 +300,11 @@ class MainActivity : ComponentActivity() {
                     }
 
                     webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            syncCurrentTrackToWeb()
+                        }
+
                         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                             val targetUri = request?.url ?: return false
                             val scheme = targetUri.scheme ?: return false

@@ -24,16 +24,10 @@
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.MyApplication">
 
-        <meta-data
-            android:name="com.google.android.gms.car.application"
-            android:resource="@xml/automotive_app_desc" />
-
-        <meta-data
-            android:name="androidx.media3.session.service"
-            android:value="androidx.media3.session.MediaLibraryService" />
 
         <activity
             android:name=".MainActivity"
+            android:launchMode="singleTask"
             android:exported="true"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:label="@string/app_name"
@@ -45,15 +39,22 @@
             </intent-filter>
         </activity>
 
+    
+        <meta-data
+            android:name="androidx.media3.session.service"
+            android:value="androidx.media3.session.MediaLibraryService" />
         <service
             android:name=".service.PlaybackService"
             android:exported="true"
-            android:foregroundServiceType="mediaPlayback">
+            android:foregroundServiceType="mediaPlayback"
+            android:permission="android.permission.FOREGROUND_SERVICE">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaLibraryService" />
+                <action android:name="androidx.media3.session.MediaSessionService" />
                 <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
+
     </application>
 
 </manifest>

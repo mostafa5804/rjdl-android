@@ -1,0 +1,1 @@
+sed -i 's/override fun onIsPlayingChanged(isPlaying: Boolean) {/override fun onIsPlayingChanged(isPlaying: Boolean) {\n                if (isPlaying) {\n                    val intent = Intent(this@PlaybackService, PlaybackService::class.java)\n                    startService(intent)\n                }/g' app/src/main/java/com/example/service/PlaybackService.kt

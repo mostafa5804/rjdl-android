@@ -6,6 +6,8 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -18,8 +20,8 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
@@ -29,6 +31,7 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
 import com.example.MainActivity
 import com.example.R
+import com.example.cache.MediaCacheManager
 import com.example.data.MusicRepository
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
@@ -39,32 +42,43 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONArray
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 @OptIn(UnstableApi::class)
 class PlaybackService : MediaLibraryService() {
 
-    private var mediaLibrarySession: MediaLibrarySession? = null
-    private lateinit var player: ExoPlayer
+    private var mediaSession: MediaLibrarySession? = null
+    private lateinit var player: Player
+    private lateinit var exoPlayer: ExoPlayer
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
     private lateinit var prefs: SharedPreferences
 
-    // In-memory cache for Android Auto categories and search queries
+    // In-memory cache for Android Auto categories, artwork bytes, and items
     private val categoryItemsCache = ConcurrentHashMap<String, List<MediaItem>>()
     private val searchResultsCache = ConcurrentHashMap<String, List<MediaItem>>()
     private val allKnownItemsMap = ConcurrentHashMap<String, MediaItem>()
+    private val artworkBytesCache = ConcurrentHashMap<String, ByteArray>()
+
+    private val imageClient = OkHttpClient.Builder()
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .build()
 
     companion object {
         const val ROOT_ID = "[ROOT]"
         const val TAB_FEATURED_SONGS = "TAB_FEATURED_SONGS"
-        const val TAB_NEW_PODCASTS = "TAB_NEW_PODCASTS"
+        const val TAB_PODCASTS = "TAB_PODCASTS"
         const val TAB_PODCAST_SHOWS = "TAB_PODCAST_SHOWS"
-        const val TAB_SEARCH_ARCHIVE = "TAB_SEARCH_ARCHIVE"
 
         // Backward compatibility IDs
         const val LEGACY_ROOT_ID = "root_radio_javan"
@@ -163,15 +177,16 @@ class PlaybackService : MediaLibraryService() {
         val cacheDataSourceFactory = MediaCacheManager.createCacheDataSourceFactory(this)
         val mediaSourceFactory = DefaultMediaSourceFactory(cacheDataSourceFactory)
 
-        player = ExoPlayer.Builder(this)
+        exoPlayer = ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
             .setAudioAttributes(audioAttributes, /* handleAudioFocus= */ true)
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
 
-        player.addListener(object : Player.Listener {
+        exoPlayer.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                // Auto handled by Media3
                 if (isPlaying) {
                     acquireLocks()
                 } else {
@@ -189,13 +204,14 @@ class PlaybackService : MediaLibraryService() {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 savePlaybackState()
                 updateCustomPodcastLayout(mediaItem)
+                preloadArtworkBytes(mediaItem)
             }
         })
     }
 
     private fun initializeSession() {
         val sessionActivityIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val sessionActivityPendingIntent = PendingIntent.getActivity(
             this,
@@ -204,7 +220,26 @@ class PlaybackService : MediaLibraryService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        mediaLibrarySession = MediaLibrarySession.Builder(this, player, LibrarySessionCallback())
+        player = object : androidx.media3.common.ForwardingPlayer(exoPlayer) {
+            override fun getAvailableCommands(): Player.Commands {
+                return super.getAvailableCommands().buildUpon()
+                    .add(Player.COMMAND_SEEK_TO_NEXT)
+                    .add(Player.COMMAND_SEEK_TO_PREVIOUS)
+                    .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                    .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                    .build()
+            }
+            override fun hasNextMediaItem(): Boolean = true
+            override fun hasPreviousMediaItem(): Boolean = true
+            override fun seekToNextMediaItem() {
+                sendBroadcast(android.content.Intent("com.example.ACTION_NEXT").apply { setPackage(packageName) })
+            }
+            override fun seekToPreviousMediaItem() {
+                sendBroadcast(android.content.Intent("com.example.ACTION_PREV").apply { setPackage(packageName) })
+            }
+        }
+
+        mediaSession = MediaLibrarySession.Builder(this, player, LibrarySessionCallback())
             .setSessionActivity(sessionActivityPendingIntent)
             .build()
     }
@@ -218,7 +253,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
-        return mediaLibrarySession
+        return mediaSession
     }
 
     private fun savePlaybackState() {
@@ -243,20 +278,41 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
+    private fun preloadArtworkBytes(mediaItem: MediaItem?) {
+        val artUri = mediaItem?.mediaMetadata?.artworkUri ?: return
+        val url = artUri.toString()
+        if (url.isEmpty() || artworkBytesCache.containsKey(url)) return
+
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val req = Request.Builder().url(url).build()
+                imageClient.newCall(req).execute().use { res ->
+                    if (res.isSuccessful) {
+                        res.body?.bytes()?.let { bytes ->
+                            artworkBytesCache[url] = bytes
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // Ignore silent artwork failure
+            }
+        }
+    }
+
     private fun updateCustomPodcastLayout(mediaItem: MediaItem?) {
-        val session = mediaLibrarySession ?: return
+        val session = mediaSession ?: return
         val isPodcast = mediaItem?.mediaMetadata?.mediaType == MediaMetadata.MEDIA_TYPE_PODCAST_EPISODE ||
                 mediaItem?.mediaMetadata?.artist?.contains("Podcast", ignoreCase = true) == true
 
         if (isPodcast) {
             val rewind10Button = CommandButton.Builder()
-                .setDisplayName("بازپخش ۱۰ ثانیه")
+                .setDisplayName("۱۰ ثانیه قبل")
                 .setIconResId(R.drawable.ic_replay_10)
                 .setSessionCommand(SessionCommand(ACTION_REWIND_10, Bundle.EMPTY))
                 .build()
 
             val forward30Button = CommandButton.Builder()
-                .setDisplayName("۳۰ ثانیه جلو")
+                .setDisplayName("۳۰ ثانیه بعد")
                 .setIconResId(R.drawable.ic_forward_30)
                 .setSessionCommand(SessionCommand(ACTION_FORWARD_30, Bundle.EMPTY))
                 .build()
@@ -270,10 +326,10 @@ class PlaybackService : MediaLibraryService() {
     override fun onDestroy() {
         savePlaybackState()
         releaseLocks()
-        mediaLibrarySession?.run {
-            player.release()
+        mediaSession?.run {
+            exoPlayer.release()
             release()
-            mediaLibrarySession = null
+            mediaSession = null
         }
         serviceScope.cancel()
         super.onDestroy()
@@ -376,7 +432,7 @@ class PlaybackService : MediaLibraryService() {
                             return@launch
                         }
 
-                        // Fallback to fetching the single saved track
+                        // Fallback to single saved track
                         val singleItem = withTimeoutOrNull(NETWORK_TIMEOUT_MS) {
                             MusicRepository.getMediaItemById("song", lastMediaId)
                                 ?: MusicRepository.getMediaItemById("podcast", lastMediaId)
@@ -423,7 +479,7 @@ class PlaybackService : MediaLibraryService() {
             params: LibraryParams?
         ): ListenableFuture<LibraryResult<MediaItem>> {
             val rootMetadata = MediaMetadata.Builder()
-                .setTitle("رادیوجوان")
+                .setTitle("RJ DL")
                 .setIsBrowsable(true)
                 .setIsPlayable(false)
                 .setMediaType(MediaMetadata.MEDIA_TYPE_FOLDER_MIXED)
@@ -448,16 +504,17 @@ class PlaybackService : MediaLibraryService() {
             val future = SettableFuture.create<LibraryResult<ImmutableList<MediaItem>>>()
 
             when {
+                // Root View: Clean 3 Tab Structure
                 parentId == ROOT_ID || parentId == LEGACY_ROOT_ID -> {
                     val rootItems = ImmutableList.of(
-                        createCategoryTabItem(TAB_FEATURED_SONGS, "🔥 داغترین آهنگها", MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS),
-                        createCategoryTabItem(TAB_NEW_PODCASTS, "🎙 جدیدترین پادکستها", MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS),
-                        createCategoryTabItem(TAB_PODCAST_SHOWS, "📻 شوهای پادکست", MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS),
-                        createCategoryTabItem(TAB_SEARCH_ARCHIVE, "🔍 آرشیو و نتایج جستجو", MediaMetadata.MEDIA_TYPE_FOLDER_MIXED)
+                        createCategoryTabItem(TAB_FEATURED_SONGS, "🔥 داغ‌ترین آهنگ‌ها", MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS),
+                        createCategoryTabItem(TAB_PODCASTS, "🎙 جدیدترین پادکست‌ها", MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS),
+                        createCategoryTabItem(TAB_PODCAST_SHOWS, "📻 آرشیو شوهای پادکست", MediaMetadata.MEDIA_TYPE_FOLDER_PODCASTS)
                     )
                     future.set(LibraryResult.ofItemList(rootItems, params))
                 }
 
+                // Tab 1: Featured Songs
                 parentId == TAB_FEATURED_SONGS || parentId == LEGACY_ID_FEATURED_SONGS -> {
                     val cached = categoryItemsCache[TAB_FEATURED_SONGS]
                     if (!cached.isNullOrEmpty()) {
@@ -480,8 +537,9 @@ class PlaybackService : MediaLibraryService() {
                     }
                 }
 
-                parentId == TAB_NEW_PODCASTS || parentId == LEGACY_ID_NEW_PODCASTS -> {
-                    val cached = categoryItemsCache[TAB_NEW_PODCASTS]
+                // Tab 2: New Podcasts
+                parentId == TAB_PODCASTS || parentId == LEGACY_ID_NEW_PODCASTS -> {
+                    val cached = categoryItemsCache[TAB_PODCASTS]
                     if (!cached.isNullOrEmpty()) {
                         future.set(LibraryResult.ofItemList(ImmutableList.copyOf(cached), params))
                     } else {
@@ -491,7 +549,7 @@ class PlaybackService : MediaLibraryService() {
                                     MusicRepository.getNewPodcasts()
                                 } ?: emptyList()
                                 if (items.isNotEmpty()) {
-                                    categoryItemsCache[TAB_NEW_PODCASTS] = items
+                                    categoryItemsCache[TAB_PODCASTS] = items
                                     items.forEach { allKnownItemsMap[it.mediaId] = it }
                                 }
                                 future.set(LibraryResult.ofItemList(ImmutableList.copyOf(items), params))
@@ -502,6 +560,7 @@ class PlaybackService : MediaLibraryService() {
                     }
                 }
 
+                // Tab 3: Podcast Shows Archive
                 parentId == TAB_PODCAST_SHOWS -> {
                     val cached = categoryItemsCache[TAB_PODCAST_SHOWS]
                     if (!cached.isNullOrEmpty()) {
@@ -524,6 +583,7 @@ class PlaybackService : MediaLibraryService() {
                     }
                 }
 
+                // Specific Podcast Show Episodes
                 parentId.startsWith("SHOW_") -> {
                     val cached = categoryItemsCache[parentId]
                     if (!cached.isNullOrEmpty()) {
@@ -544,13 +604,6 @@ class PlaybackService : MediaLibraryService() {
                             }
                         }
                     }
-                }
-
-                parentId == TAB_SEARCH_ARCHIVE -> {
-                    val archiveItems = searchResultsCache.values.flatten().distinctBy { it.mediaId }.ifEmpty {
-                        categoryItemsCache[TAB_FEATURED_SONGS] ?: emptyList()
-                    }
-                    future.set(LibraryResult.ofItemList(ImmutableList.copyOf(archiveItems), params))
                 }
 
                 else -> {
@@ -713,13 +766,13 @@ class PlaybackService : MediaLibraryService() {
         private suspend fun resolveMediaItemsList(items: List<MediaItem>): List<MediaItem> {
             return items.map { item ->
                 val currentUri = item.requestMetadata.mediaUri ?: item.localConfiguration?.uri
-                if (currentUri != null && currentUri.toString().isNotEmpty()) {
+                val uriStr = currentUri?.toString() ?: ""
+                if (uriStr.isNotEmpty() && !uriStr.contains("kind=podcast&") && !uriStr.contains("kind=song&")) {
                     item
                 } else {
                     allKnownItemsMap[item.mediaId] ?: run {
                         val fetched = withTimeoutOrNull(NETWORK_TIMEOUT_MS) {
-                            MusicRepository.getMediaItemById("song", item.mediaId)
-                                ?: MusicRepository.getMediaItemById("podcast", item.mediaId)
+                            MusicRepository.resolveDirectMediaItem(item)
                         }
                         fetched?.also { allKnownItemsMap[item.mediaId] = it } ?: item
                     }
@@ -731,7 +784,7 @@ class PlaybackService : MediaLibraryService() {
             categoryItemsCache[TAB_FEATURED_SONGS]?.let { list ->
                 if (list.any { it.mediaId == mediaId }) return list
             }
-            categoryItemsCache[TAB_NEW_PODCASTS]?.let { list ->
+            categoryItemsCache[TAB_PODCASTS]?.let { list ->
                 if (list.any { it.mediaId == mediaId }) return list
             }
             for ((key, list) in categoryItemsCache) {
@@ -758,5 +811,13 @@ class PlaybackService : MediaLibraryService() {
             .setMediaId(id)
             .setMediaMetadata(metadata)
             .build()
+    }
+
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        val p = mediaSession?.player
+        if (p == null || !p.playWhenReady || p.mediaItemCount == 0 || p.playbackState == Player.STATE_ENDED) {
+            stopSelf()
+        }
     }
 }
