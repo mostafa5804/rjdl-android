@@ -15,6 +15,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
 import android.util.Base64
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
@@ -178,7 +179,12 @@ class MainActivity : ComponentActivity() {
         syncCurrentTrackToWeb()
         mediaController?.let {
             val isPlaying = it.isPlaying
+            val pos = it.currentPosition
+            val dur = it.duration
             webView?.evaluateJavascript("if(window.onNativePlaybackStateChanged){window.onNativePlaybackStateChanged($isPlaying);}", null)
+            if (dur > 0) {
+                webView?.evaluateJavascript("if(window.onNativeProgress){window.onNativeProgress($pos,$dur);}", null)
+            }
         }
     }
 
@@ -193,7 +199,12 @@ class MainActivity : ComponentActivity() {
                     syncCurrentTrackToWeb()
                     mediaController?.let {
                         val isPlaying = it.isPlaying
+                        val pos = it.currentPosition
+                        val dur = it.duration
                         webView?.evaluateJavascript("if(window.onNativePlaybackStateChanged){window.onNativePlaybackStateChanged($isPlaying);}", null)
+                        if (dur > 0) {
+                            webView?.evaluateJavascript("if(window.onNativeProgress){window.onNativeProgress($pos,$dur);}", null)
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -241,6 +252,9 @@ class MainActivity : ComponentActivity() {
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
+                    try {
+                        setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                    } catch (ignored: Exception) {}
 
                     settings.apply {
                         javaScriptEnabled = true

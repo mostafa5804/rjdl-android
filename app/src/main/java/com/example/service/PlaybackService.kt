@@ -97,7 +97,7 @@ class PlaybackService : MediaLibraryService() {
         private const val KEY_LAST_QUEUE_JSON = "last_queue_json"
 
         const val CHANNEL_ID = "radio_javan_playback_channel"
-        private const val NETWORK_TIMEOUT_MS = 6000L
+        private const val NETWORK_TIMEOUT_MS = 15000L
     }
 
     override fun onCreate() {

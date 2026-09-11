@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#090D16" id="themeMeta">
 <meta name="color-scheme" content="light dark">
-<title>رادیوجوان دانلودر | RJ Studio v1.2</title>
+<title>رادیوجوان دانلودر | RJ Studio v1.3</title>
 
 <!-- Fonts & Scripts -->
 <link rel="manifest" href="./manifest.json">
@@ -535,7 +535,7 @@ header small { display: block; color: var(--muted); font-size: 0.74rem; margin-t
         </div>
         <div>
           <h1>رادیوجوان دانلودر | RJ Studio</h1>
-          <small>v1.2 · <span data-i18n="headerSub">دانلود و پخش آنلاین بدون محدودیت</span></small>
+          <small>v1.3 · <span data-i18n="headerSub">دانلود و پخش آنلاین بدون محدودیت</span></small>
         </div>
       </div>
     </div>
@@ -702,7 +702,7 @@ header small { display: block; color: var(--muted); font-size: 0.74rem; margin-t
       </a>
       <span>·</span>
       <a href="https://github.com/mostafa5804/rjdl-android" target="_blank" rel="noopener">
-        <i class="fa-brands fa-android"></i> نسخه اندروید (v1.2)
+        <i class="fa-brands fa-android"></i> نسخه اندروید (v1.3)
       </a>
     </div>
   </div>
@@ -1186,7 +1186,7 @@ window.onNativeProgress = function(posMs, durMs) {
 };
 window.onNativeTrackChanged = function(jsonStr) {
   try {
-     const json = JSON.parse(jsonStr);
+     const json = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
      const coverSrc = json.coverUrl || '';
      $('#bpCover').src = coverSrc;
      $('#bpTitle').textContent = json.title;
@@ -1195,6 +1195,14 @@ window.onNativeTrackChanged = function(jsonStr) {
      $('#fpArtGlow').style.backgroundImage = 'url("' + coverSrc + '")';
      $('#fpTitle').textContent = json.title;
      $('#fpArtist').textContent = json.artist || '—';
+     if (json.id && currentQueue && currentQueue.length) {
+       const idx = currentQueue.findIndex(x => (x.permlink || x.id) === json.id);
+       if (idx >= 0) {
+         currentQueueIndex = idx;
+         currentItem = currentQueue[idx];
+       }
+     }
+     updateEqualizers();
   } catch(e){}
 };
 window.onNativePlaybackEnded = function() {
@@ -1328,12 +1336,32 @@ async function togglePlay(item, btn, queueList = [], qIndex = -1) {
 
   if (currentPlayBtn) setPlayState(currentPlayBtn, false);
 
+  if (!btn && item) {
+    const row = document.querySelector(`.trow[data-id="${item.permlink || item.id}"]`);
+    if (row) btn = row.querySelector('.tplay');
+  }
+
   if (queueList && queueList.length > 0) {
     currentQueue = queueList;
     currentQueueIndex = (qIndex >= 0) ? qIndex : queueList.findIndex(x => (x.permlink || x.id) === (item.permlink || item.id));
+    if (currentQueueIndex < 0) currentQueueIndex = 0;
   } else if (!currentQueue.length) {
     currentQueue = [item];
     currentQueueIndex = 0;
+  }
+
+  // Prevent dead-end queues: if only 1 item exists in queue, append trending tracks
+  if (currentQueue.length === 1 && browseState.songs && browseState.songs.items && browseState.songs.items.length > 0) {
+    const curId = item.permlink || item.id;
+    const extraTracks = browseState.songs.items.filter(x => (x.permlink || x.id) !== curId);
+    if (extraTracks.length > 0) {
+      currentQueue.push(...extraTracks);
+    }
+  }
+
+  // If queue is short and track has a valid artist, fetch artist discography in background
+  if (currentQueue.length <= 5 && item.artist && item.artist !== '—' && item.artist !== 'Radio Javan') {
+    fetchArtistTracksInBackground(item.artist, item);
   }
 
   setPlayState(btn, 'loading');
@@ -1406,14 +1434,72 @@ async function togglePlay(item, btn, queueList = [], qIndex = -1) {
   });
 }
 
+let shufflePool = [];
+let shuffleHistory = [];
+
+function resetShufflePool() {
+  if (!currentQueue || currentQueue.length <= 1) {
+    shufflePool = [];
+    return;
+  }
+  shufflePool = [];
+  for (let i = 0; i < currentQueue.length; i++) {
+    if (i !== currentQueueIndex) shufflePool.push(i);
+  }
+  for (let i = shufflePool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shufflePool[i], shufflePool[j]] = [shufflePool[j], shufflePool[i]];
+  }
+}
+
+let isFetchingArtistBg = false;
+async function fetchArtistTracksInBackground(artistName, currentPlayingItem) {
+  if (isFetchingArtistBg || !artistName) return;
+  isFetchingArtistBg = true;
+  try {
+    const data = await fetchArtist(artistName);
+    if (data && (data.mp3s || data.songs)) {
+      const moreTracks = [...(data.mp3s || []), ...(data.songs || [])].map(normalizeItem);
+      const curId = currentPlayingItem.permlink || currentPlayingItem.id;
+      const filtered = moreTracks.filter(t => {
+        const tid = t.permlink || t.id;
+        return tid !== curId && !currentQueue.some(q => (q.permlink || q.id) === tid);
+      });
+      if (filtered.length > 0) {
+        currentQueue.splice(currentQueueIndex + 1, 0, ...filtered);
+        if (isShuffle) resetShufflePool();
+      }
+    }
+  } catch (err) {
+    console.warn('Background artist tracks fetch:', err);
+  } finally {
+    isFetchingArtistBg = false;
+  }
+}
+
 function playNextInQueue() {
   if (!currentQueue || !currentQueue.length) return;
+  if (repeatMode === 'one') {
+    if (window.AndroidBridge) {
+      window.AndroidBridge.seekTo(0);
+      window.AndroidBridge.resume();
+    } else if (currentAudio) {
+      currentAudio.currentTime = 0;
+      currentAudio.play().catch(() => {});
+    }
+    return;
+  }
+
   let nextIdx = currentQueueIndex;
   if (isShuffle) {
     if (currentQueue.length > 1) {
-      do {
-        nextIdx = Math.floor(Math.random() * currentQueue.length);
-      } while (nextIdx === currentQueueIndex);
+      if (shufflePool.length === 0) {
+        resetShufflePool();
+      }
+      if (shufflePool.length > 0) {
+        shuffleHistory.push(currentQueueIndex);
+        nextIdx = shufflePool.shift();
+      }
     }
   } else {
     if (currentQueueIndex < currentQueue.length - 1) {
@@ -1439,10 +1525,10 @@ function playPrevInQueue() {
   }
   let prevIdx = currentQueueIndex;
   if (isShuffle) {
-    if (currentQueue.length > 1) {
-      do {
-        prevIdx = Math.floor(Math.random() * currentQueue.length);
-      } while (prevIdx === currentQueueIndex);
+    if (shuffleHistory.length > 0) {
+      prevIdx = shuffleHistory.pop();
+    } else if (currentQueue.length > 1) {
+      prevIdx = Math.floor(Math.random() * currentQueue.length);
     }
   } else {
     if (currentQueueIndex > 0) {
@@ -1461,7 +1547,14 @@ function playPrevInQueue() {
 
 $('#fpShuffleBtn').onclick = () => {
   isShuffle = !isShuffle;
+  if (isShuffle) {
+    resetShufflePool();
+    shuffleHistory = [];
+  }
   $('#fpShuffleBtn').classList.toggle('active', isShuffle);
+  if (window.AndroidBridge && window.AndroidBridge.setShuffleMode) {
+    window.AndroidBridge.setShuffleMode(isShuffle);
+  }
   toast(currentLang === 'fa' ? (isShuffle ? 'پخش تصادفی فعال شد' : 'پخش تصادفی غیرفعال شد') : (isShuffle ? 'Shuffle enabled' : 'Shuffle disabled'), 'ok', 1400);
 };
 
@@ -1471,11 +1564,13 @@ $('#fpRepeatBtn').onclick = () => {
   if (repeatMode === 'off') {
     repeatMode = 'all';
     btn.classList.add('active');
-    badge.classList.remove('show');
+    badge.textContent = 'ALL';
+    badge.classList.add('show');
     toast(currentLang === 'fa' ? 'تکرار کل لیست فعال شد' : 'Repeat all enabled', 'ok', 1400);
   } else if (repeatMode === 'all') {
     repeatMode = 'one';
     btn.classList.add('active');
+    badge.textContent = '1';
     badge.classList.add('show');
     toast(currentLang === 'fa' ? 'تکرار همین قطعه فعال شد' : 'Repeat one enabled', 'ok', 1400);
   } else {
@@ -1483,6 +1578,9 @@ $('#fpRepeatBtn').onclick = () => {
     btn.classList.remove('active');
     badge.classList.remove('show');
     toast(currentLang === 'fa' ? 'تکرار غیرفعال شد' : 'Repeat disabled', 'ok', 1400);
+  }
+  if (window.AndroidBridge && window.AndroidBridge.setRepeatMode) {
+    window.AndroidBridge.setRepeatMode(repeatMode);
   }
 };
 
@@ -1639,8 +1737,18 @@ function normalizeItem(raw) {
   if (typeof perm === 'string' && perm.includes('/')) perm = perm.split('/').filter(Boolean).pop();
   if (typeof perm === 'string' && perm.startsWith('http')) perm = raw.id || '';
 
-  const hq = raw.hq_link || (typeof raw.link === 'string' && raw.link.startsWith('http') ? raw.link : null) || raw.audio_url || null;
+  const isPod = raw.type === 'podcast' || !!raw.podcast_artist;
+  let hq = raw.hq_link || (typeof raw.link === 'string' && raw.link.startsWith('http') ? raw.link : null) || raw.audio_url || null;
   let lq = raw.lq_link || (hq && hq.includes('/320/') ? hq.replace('/320/', '/128/') : hq);
+  if (!hq && perm) {
+    if (isPod) {
+      hq = `https://media.rj-deskcloud.com/media/podcast/mp3-320/${perm}.mp3`;
+      lq = `https://media.rj-deskcloud.com/media/podcast/mp3-128/${perm}.mp3`;
+    } else {
+      hq = `https://media.rj-deskcloud.com/media/mp3/mp3-320/${perm}.mp3`;
+      lq = `https://media.rj-deskcloud.com/media/mp3/mp3-128/${perm}.mp3`;
+    }
+  }
   return {
     id: perm || raw.id || null,
     title: raw.title || raw.song || raw.name || 'Untitled',
@@ -1649,7 +1757,7 @@ function normalizeItem(raw) {
     duration: raw.duration != null ? Math.round(raw.duration) : null,
     hqUrl: hq, lqUrl: lq, audioUrl: hq || lq, permlink: perm || null,
     lyric: raw.lyric || raw.lyrics || '',
-    type: raw.type || (raw.podcast_artist ? 'podcast' : 'song')
+    type: raw.type || (isPod ? 'podcast' : 'song')
   };
 }
 
@@ -1889,16 +1997,17 @@ function handleTrackClick(e, getList) {
   const item = list[idx];
   if (!item) return;
 
-  if (e.target.closest('.tplay')) { togglePlay(item, row.querySelector('.tplay'), list, idx); }
-  else if (e.target.closest('.tdl')) { downloadOne(item, row.querySelector('.tdl')); }
+  if (e.target.closest('.tdl')) { downloadOne(item, row.querySelector('.tdl')); }
   else if (e.target.closest('.tcopy')) { copyDirectLink(item); }
   else if (e.target.closest('.tlyric')) { openLyrics(item); }
   else if (e.target.closest('.tfav')) {
     toggleFav(item);
     row.querySelector('.tfav').classList.toggle('active', isFav(item.permlink || item.id));
-  } else if (e.target.closest('.tmeta')) {
-    const cb = row.querySelector('.trow-cb');
-    if (cb && e.target.tagName !== 'INPUT') cb.checked = !cb.checked;
+  } else if (e.target.closest('.trow-cb')) {
+    // Checkbox toggles
+  } else {
+    // Clicking play button or anywhere on the row plays the item in list context
+    togglePlay(item, row.querySelector('.tplay'), list, idx);
   }
 }
 
@@ -2074,13 +2183,42 @@ async function processInput() {
       if (!data) throw new Error();
 
       let featured = null;
-      if (Array.isArray(data.shows) && data.shows.length > 0) {
-        featured = { type: 'show', ...data.shows[0] };
-      } else if (Array.isArray(data.artists) && data.artists.length > 0) {
+      if (Array.isArray(data.artists) && data.artists.length > 0) {
         featured = { type: 'artist', ...data.artists[0] };
+      } else if (Array.isArray(data.shows) && data.shows.length > 0) {
+        featured = { type: 'show', ...data.shows[0] };
       }
 
-      const rawItems = [...(data.podcasts || []), ...(data.mp3s || []), ...(data.songs || [])];
+      // Prioritize songs and mp3s before podcasts
+      let rawItems = [...(data.mp3s || []), ...(data.songs || []), ...(data.podcasts || [])];
+
+      // If an artist was matched, fetch full artist catalog and prepend their songs
+      if (featured && featured.type === 'artist') {
+        try {
+          const artistKey = featured.query || featured.name;
+          if (artistKey) {
+            const artistData = await fetchArtist(artistKey);
+            if (artistData && (artistData.mp3s || artistData.songs)) {
+              const artistSongs = [...(artistData.mp3s || []), ...(artistData.songs || [])];
+              if (artistSongs.length > 0) {
+                rawItems = [...artistSongs, ...rawItems];
+              }
+            }
+          }
+        } catch(err) {
+          console.warn('Artist quick load:', err);
+        }
+      }
+
+      // Deduplicate results
+      const seen = new Set();
+      rawItems = rawItems.filter(it => {
+        const k = it.permlink || it.id || it.title;
+        if (!k || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+
       if (!rawItems.length && !featured) {
         $('#result').classList.remove('show');
         setStatus(currentLang === 'fa' ? 'هیچ موردی یافت نشد' : 'No results found', 'warn');

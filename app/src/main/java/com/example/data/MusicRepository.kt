@@ -121,10 +121,31 @@ object MusicRepository {
                 val json = JSONObject(bodyStr)
                 val items = mutableListOf<MediaItem>()
 
+                if (json.has("artists")) {
+                    val artists = json.getJSONArray("artists")
+                    if (artists.length() > 0) {
+                        val artistObj = artists.getJSONObject(0)
+                        val artistQuery = artistObj.optString("query").ifEmpty { artistObj.optString("name") }
+                        if (artistQuery.isNotEmpty()) {
+                            try {
+                                val artistUrl = "$CF_WORKER_URL/?kind=artist&query=${URLEncoder.encode(artistQuery, "UTF-8")}"
+                                val artistItems = fetchMediaItemsFromEndpoint(artistUrl, isPodcast = false)
+                                items.addAll(artistItems)
+                            } catch (ignored: Exception) {}
+                        }
+                    }
+                }
                 if (json.has("mp3s")) {
                     val mp3s = json.getJSONArray("mp3s")
                     for (i in 0 until mp3s.length()) {
                         val obj = mp3s.getJSONObject(i)
+                        parseJsonToMediaItem(obj, isPodcast = false)?.let { items.add(it) }
+                    }
+                }
+                if (json.has("songs")) {
+                    val songs = json.getJSONArray("songs")
+                    for (i in 0 until songs.length()) {
+                        val obj = songs.getJSONObject(i)
                         parseJsonToMediaItem(obj, isPodcast = false)?.let { items.add(it) }
                     }
                 }
@@ -135,14 +156,8 @@ object MusicRepository {
                         parseJsonToMediaItem(obj, isPodcast = true)?.let { items.add(it) }
                     }
                 }
-                if (json.has("songs")) {
-                    val songs = json.getJSONArray("songs")
-                    for (i in 0 until songs.length()) {
-                        val obj = songs.getJSONObject(i)
-                        parseJsonToMediaItem(obj, isPodcast = false)?.let { items.add(it) }
-                    }
-                }
-                items
+                val seen = mutableSetOf<String>()
+                items.filter { seen.add(it.mediaId) }
             }
         } catch (e: Exception) {
             e.printStackTrace()
