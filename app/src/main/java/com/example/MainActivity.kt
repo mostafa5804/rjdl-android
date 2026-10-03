@@ -151,9 +151,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             val isDark = isSystemInDarkTheme()
             val colorScheme = if (isDark) {
-                darkColorScheme(background = Color(0xFF0B0F19))
+                darkColorScheme(background = Color(0xFF201F1C))
             } else {
-                lightColorScheme(background = Color(0xFFEBF0F7))
+                lightColorScheme(background = Color(0xFFF4F0E8))
             }
 
             MaterialTheme(colorScheme = colorScheme) {
@@ -253,8 +253,9 @@ class MainActivity : ComponentActivity() {
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
                     try {
-                        setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                        setLayerType(View.LAYER_TYPE_NONE, null)
                     } catch (ignored: Exception) {}
+                    setBackgroundColor(android.graphics.Color.parseColor("#201F1C"))
 
                     settings.apply {
                         javaScriptEnabled = true
@@ -309,6 +310,9 @@ class MainActivity : ComponentActivity() {
 
                     webChromeClient = object : WebChromeClient() {
                         override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                            consoleMessage?.let {
+                                android.util.Log.d("WebViewConsole", "${it.message()} -- line ${it.lineNumber()} of ${it.sourceId()}")
+                            }
                             return super.onConsoleMessage(consoleMessage)
                         }
                     }
@@ -317,6 +321,11 @@ class MainActivity : ComponentActivity() {
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
                             syncCurrentTrackToWeb()
+                        }
+
+                        override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: android.webkit.WebResourceError?) {
+                            super.onReceivedError(view, request, error)
+                            android.util.Log.e("WebViewError", "Failed: ${request?.url} -> ${error?.description}")
                         }
 
                         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
